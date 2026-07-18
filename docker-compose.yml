@@ -1,0 +1,35 @@
+# Docker Compose for the burpee counter.
+#
+# Set the input video and output dir via env vars (defaults shown):
+#   VIDEO=example.mp4  OUTDIR=./out
+#
+# Usage:
+#   docker compose build
+#   VIDEO="$PWD/example.mp4" OUTDIR="$PWD/out" docker compose run --rm count
+#   # then transcode the mp4v output to H.264 for universal playback:
+#   VIDEO="$PWD/example.mp4" OUTDIR="$PWD/out" docker compose run --rm transcode
+#
+# For the full one-shot pipeline, prefer `make run VIDEO=...` or `./run.sh`.
+
+x-common: &common
+  build: .
+  image: burpee-counter
+  volumes:
+    - "${VIDEO:-example.mp4}:/data/input${VIDEO_EXT:-.mp4}:ro"
+    - "${OUTDIR:-./out}:/out"
+
+services:
+  # count + plot + annotated video (raw.mp4), all in one pose pass.
+  count:
+    <<: *common
+    command: >
+      /data/input${VIDEO_EXT:-.mp4}
+      --out /out/raw.mp4 --plot /out/signal.png
+
+  # transcode the raw mp4v output to H.264.
+  transcode:
+    <<: *common
+    entrypoint: ffmpeg
+    command: >
+      -y -i /out/raw.mp4 -c:v libx264 -pix_fmt yuv420p
+      -movflags +faststart /out/annotated.mp4

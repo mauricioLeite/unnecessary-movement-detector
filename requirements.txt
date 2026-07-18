@@ -1,0 +1,5 @@
+mediapipe==0.10.14
+opencv-python-headless==4.10.0.84
+scipy==1.14.1
+numpy==1.26.4
+matplotlib==3.9.2
