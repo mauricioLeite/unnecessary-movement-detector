@@ -3,10 +3,12 @@
 # Usage:
 #   make build                       # build the Docker image (one time)
 #   make run VIDEO=example.mp4       # count + plot + annotated video -> OUTDIR
+#   make count VIDEO=example.mp4     # count + plot only (no video, fastest)
 #   make clean                       # remove generated outputs
 #
 # Override variables on the command line, e.g.:
 #   make run VIDEO=workout.mp4 OUTDIR=results FLAGS="--min-gap 0.8"
+#   make count VIDEO=workout.mp4 FLAGS="--frame-step 3 --model-complexity 0"
 
 IMAGE   ?= burpee-counter
 # Accept either VIDEO=... or lowercase video=... (make vars are case-sensitive;
@@ -28,7 +30,7 @@ DOCKER_RUN = docker run --rm \
 	-v "$(VIDEO_ABS):/data/$(VIDEO_NAME):ro" \
 	-v "$(OUTDIR_ABS):/out"
 
-.PHONY: build run clean help _check
+.PHONY: build run count clean help _check
 
 help:
 	@sed -n 's/^# \{0,1\}//; 1,/^$$/p' $(MAKEFILE_LIST)
@@ -54,11 +56,19 @@ run: _check | $(OUTDIR_ABS)
 	$(DOCKER_RUN) $(IMAGE) /data/$(VIDEO_NAME) \
 		--out /out/$(STEM)_raw.mp4 --plot /out/$(STEM)_signal.png $(FLAGS)
 	$(DOCKER_RUN) --entrypoint ffmpeg $(IMAGE) -y -i /out/$(STEM)_raw.mp4 \
-		-c:v libx264 -pix_fmt yuv420p -movflags +faststart \
+		-c:v libx264 -crf 18 -preset slow -pix_fmt yuv420p -movflags +faststart \
 		/out/$(STEM)_annotated.mp4
 	$(DOCKER_RUN) --entrypoint rm $(IMAGE) -f /out/$(STEM)_raw.mp4
 	-$(DOCKER_RUN) --entrypoint chown $(IMAGE) -R $(UID):$(GID) /out
 	@echo ">> Done. See $(OUTDIR)/$(STEM)_annotated.mp4 and $(STEM)_signal.png"
+
+# Count + plot only — skips the render/transcode entirely, by far the fastest
+# way to get a result. Good for tuning flags or long videos.
+count: _check | $(OUTDIR_ABS)
+	$(DOCKER_RUN) $(IMAGE) /data/$(VIDEO_NAME) \
+		--plot /out/$(STEM)_signal.png --no-video $(FLAGS)
+	-$(DOCKER_RUN) --entrypoint chown $(IMAGE) -R $(UID):$(GID) /out
+	@echo ">> Done (count only). See $(OUTDIR)/$(STEM)_signal.png"
 
 clean:
 	rm -rf $(OUTDIR_ABS)
