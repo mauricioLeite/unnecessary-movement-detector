@@ -1,35 +1,65 @@
-# Docker Compose for the burpee counter.
+# Stages of the Unnecessary Movement Detector pipeline. Make runs these and
+# passes the input video, output directory, and detection flags through the
+# environment; .env holds the values used when you run compose yourself.
 #
-# Set the input video and output dir via env vars (defaults shown):
-#   VIDEO=example.mp4  OUTDIR=./out
-#
-# Usage:
-#   docker compose build
-#   VIDEO="$PWD/example.mp4" OUTDIR="$PWD/out" docker compose run --rm count
-#   # then transcode the mp4v output to H.264 for universal playback:
-#   VIDEO="$PWD/example.mp4" OUTDIR="$PWD/out" docker compose run --rm transcode
-#
-# For the full one-shot pipeline, prefer `make run VIDEO=...` or `./run.sh`.
+#   docker compose run --rm count
 
-x-common: &common
+name: movement-detector
+
+# Stages that read the input video.
+x-analysis: &analysis
   build: .
-  image: burpee-counter
+  image: movement-detector
   volumes:
-    - "${VIDEO:-example.mp4}:/data/input${VIDEO_EXT:-.mp4}:ro"
-    - "${OUTDIR:-./out}:/out"
+    - "${VIDEO_PATH}:/data/${VIDEO_NAME}:ro"
+    - "${OUT_DIR}:/out"
+
+# Stages that only touch the results.
+x-results: &results
+  build: .
+  image: movement-detector
+  volumes:
+    - "${OUT_DIR}:/out"
 
 services:
-  # count + plot + annotated video (raw.mp4), all in one pose pass.
+  # Count repetitions and plot the signal, skipping the annotated video.
   count:
-    <<: *common
+    <<: *analysis
     command: >
-      /data/input${VIDEO_EXT:-.mp4}
-      --out /out/raw.mp4 --plot /out/signal.png
+      /data/${VIDEO_NAME}
+      --plot /out/${STEM}_signal.png
+      --no-video
+      ${FLAGS}
 
-  # transcode the raw mp4v output to H.264.
+  # Count, plot, and render the annotated video as an mp4v intermediate.
+  render:
+    <<: *analysis
+    command: >
+      /data/${VIDEO_NAME}
+      --out /out/${STEM}_raw.mp4
+      --plot /out/${STEM}_signal.png
+      ${FLAGS}
+
+  # Convert the intermediate to H.264 so it plays anywhere.
   transcode:
-    <<: *common
+    <<: *results
     entrypoint: ffmpeg
     command: >
-      -y -i /out/raw.mp4 -c:v libx264 -pix_fmt yuv420p
-      -movflags +faststart /out/annotated.mp4
+      -y -i /out/${STEM}_raw.mp4
+      -c:v libx264 -crf 18 -preset slow -pix_fmt yuv420p -movflags +faststart
+      /out/${STEM}_annotated.mp4
+
+  # The stages above write as root; hand the results back to the host user.
+  fix-perms:
+    <<: *results
+    entrypoint: chown
+    command: -R ${HOST_UID}:${HOST_GID} /out
+
+  test:
+    build: .
+    image: movement-detector
+    entrypoint: python
+    command: -m unittest discover -s tests
+    working_dir: /app
+    volumes:
+      - ".:/app:ro"

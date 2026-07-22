@@ -1,74 +1,62 @@
-# Burpee counter — convenience targets.
-#
-# Usage:
-#   make build                       # build the Docker image (one time)
-#   make run VIDEO=example.mp4       # count + plot + annotated video -> OUTDIR
-#   make count VIDEO=example.mp4     # count + plot only (no video, fastest)
-#   make clean                       # remove generated outputs
-#
-# Override variables on the command line, e.g.:
-#   make run VIDEO=workout.mp4 OUTDIR=results FLAGS="--min-gap 0.8"
-#   make count VIDEO=workout.mp4 FLAGS="--frame-step 3 --model-complexity 0"
+# Unnecessary Movement Detector
+#   make build                    build the image
+#   make count VIDEO=clip.mp4     count repetitions and plot the signal
+#   make run   VIDEO=clip.mp4     also render the annotated video
+#   make test                     run the unit tests
+#   make clean OUTDIR=out         remove an output directory
+#   options: OUTDIR=dir FLAGS="--frame-step 2 --model-complexity 0"
 
-IMAGE   ?= burpee-counter
-# Accept either VIDEO=... or lowercase video=... (make vars are case-sensitive;
-# supporting both avoids the common "my override was silently ignored" trap).
+# Lowercase overrides are accepted for compatibility.
 VIDEO   ?= $(or $(video),example.mp4)
 OUTDIR  ?= $(or $(outdir),out)
 FLAGS   ?= $(flags)
 
-# Absolute paths + basename for clean docker -v mounts.
-VIDEO_ABS  := $(abspath $(VIDEO))
+VIDEO_PATH := $(abspath $(VIDEO))
 VIDEO_NAME := $(notdir $(VIDEO))
-OUTDIR_ABS := $(abspath $(OUTDIR))
+OUT_DIR    := $(abspath $(OUTDIR))
 STEM       := $(basename $(VIDEO_NAME))
-UID        := $(shell id -u)
-GID        := $(shell id -g)
+# Not UID/GID: shells reset those, so they never reach compose.
+HOST_UID   := $(shell id -u)
+HOST_GID   := $(shell id -g)
 
-# docker run with the input mounted read-only and OUTDIR writable.
-DOCKER_RUN = docker run --rm \
-	-v "$(VIDEO_ABS):/data/$(VIDEO_NAME):ro" \
-	-v "$(OUTDIR_ABS):/out"
+export VIDEO_PATH VIDEO_NAME OUT_DIR STEM FLAGS HOST_UID HOST_GID
 
-.PHONY: build run count clean help _check
+COMPOSE ?= docker compose
+# -T leaves stdout non-interactive, so the script reports progress line by line.
+RUN      = $(COMPOSE) run --rm -T
+
+.PHONY: build run count test clean help _check
 
 help:
 	@sed -n 's/^# \{0,1\}//; 1,/^$$/p' $(MAKEFILE_LIST)
 
 build:
-	docker build -t $(IMAGE) .
+	$(COMPOSE) build
 
-# Fail early with a clear message if the input isn't a real file. Without this,
-# Docker would silently create an empty DIRECTORY at the mount path and then
-# OpenCV would report the confusing "Could not open video".
+# Docker treats a missing bind-mount source as a directory.
 _check:
-	@test -f "$(VIDEO_ABS)" || { \
-		echo "ERROR: video not found: '$(VIDEO)' (looked at $(VIDEO_ABS))"; \
+	@test -f "$(VIDEO_PATH)" || { \
+		echo "ERROR: video not found: '$(VIDEO)' (looked at $(VIDEO_PATH))"; \
 		echo "       pass one with:  make run VIDEO=your_clip.mp4"; \
 		exit 1; }
 
-$(OUTDIR_ABS):
-	mkdir -p $(OUTDIR_ABS)
+$(OUT_DIR):
+	mkdir -p $(OUT_DIR)
 
-# One script run does count + plot + annotated (mp4v); then we transcode to
-# H.264 for universal playback, drop the intermediate, and fix ownership.
-run: _check | $(OUTDIR_ABS)
-	$(DOCKER_RUN) $(IMAGE) /data/$(VIDEO_NAME) \
-		--out /out/$(STEM)_raw.mp4 --plot /out/$(STEM)_signal.png $(FLAGS)
-	$(DOCKER_RUN) --entrypoint ffmpeg $(IMAGE) -y -i /out/$(STEM)_raw.mp4 \
-		-c:v libx264 -crf 18 -preset slow -pix_fmt yuv420p -movflags +faststart \
-		/out/$(STEM)_annotated.mp4
-	$(DOCKER_RUN) --entrypoint rm $(IMAGE) -f /out/$(STEM)_raw.mp4
-	-$(DOCKER_RUN) --entrypoint chown $(IMAGE) -R $(UID):$(GID) /out
-	@echo ">> Done. See $(OUTDIR)/$(STEM)_annotated.mp4 and $(STEM)_signal.png"
+run: _check | $(OUT_DIR)
+	$(RUN) render
+	$(RUN) transcode
+	-$(RUN) fix-perms
+	rm -f $(OUT_DIR)/$(STEM)_raw.mp4
+	@echo ">> Done. See $(OUTDIR)/$(STEM)_annotated.mp4 and $(OUTDIR)/$(STEM)_signal.png"
 
-# Count + plot only — skips the render/transcode entirely, by far the fastest
-# way to get a result. Good for tuning flags or long videos.
-count: _check | $(OUTDIR_ABS)
-	$(DOCKER_RUN) $(IMAGE) /data/$(VIDEO_NAME) \
-		--plot /out/$(STEM)_signal.png --no-video $(FLAGS)
-	-$(DOCKER_RUN) --entrypoint chown $(IMAGE) -R $(UID):$(GID) /out
+count: _check | $(OUT_DIR)
+	$(RUN) count
+	-$(RUN) fix-perms
 	@echo ">> Done (count only). See $(OUTDIR)/$(STEM)_signal.png"
 
+test:
+	$(RUN) test
+
 clean:
-	rm -rf $(OUTDIR_ABS)
+	rm -rf $(OUT_DIR)
