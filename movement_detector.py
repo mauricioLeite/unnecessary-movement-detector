@@ -9,6 +9,8 @@ import mediapipe as mp
 import numpy as np
 from scipy.signal import find_peaks, savgol_filter
 
+__version__ = "0.1.0"
+
 mp_pose = mp.solutions.pose
 mp_draw = mp.solutions.drawing_utils
 mp_styles = mp.solutions.drawing_styles
@@ -332,6 +334,9 @@ def parse_args(argv=None):
             "Count burpees with find_peaks and a state machine, then optionally "
             "render an annotated video"
         )
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
     )
     parser.add_argument("video", help="path to input video")
     parser.add_argument(

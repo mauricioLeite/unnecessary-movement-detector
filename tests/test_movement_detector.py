@@ -145,6 +145,16 @@ class ArgumentTests(unittest.TestCase):
                     with self.assertRaises(SystemExit):
                         movement_detector.parse_args(["video.mp4", *arguments])
 
+    def test_version_is_reported_without_a_video(self):
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            with self.assertRaises(SystemExit) as exit_status:
+                movement_detector.parse_args(["--version"])
+
+        self.assertEqual(exit_status.exception.code, 0)
+        self.assertIn(movement_detector.__version__, output.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
