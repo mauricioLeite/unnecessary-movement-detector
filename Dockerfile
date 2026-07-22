@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# System libs needed by OpenCV / MediaPipe
+# Runtime libraries for OpenCV and video transcoding.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \
         libglib2.0-0 \
@@ -12,6 +12,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY burpee_counter.py .
+COPY movement_detector.py .
 
-ENTRYPOINT ["python", "burpee_counter.py"]
+ENTRYPOINT ["python", "movement_detector.py"]
